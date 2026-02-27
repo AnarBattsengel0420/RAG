@@ -1,0 +1,7 @@
+Machine learning is a subset of artificial intelligence that focuses on building systems that can learn from and make decisions based on data.
+
+5G networks promise to revolutionize mobile connectivity by offering faster speeds, lower latency, and greater capacity than previous generations.
+
+Artificial intelligence is rapidly transforming industries by enabling machines to learn from data, adapt to new inputs, and perform tasks that traditionally required human intelligence.
+
+Blockchain technology underpins cryptocurrencies and offers a decentralized, secure way to record transactions across many computers.

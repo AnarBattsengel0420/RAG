@@ -1,0 +1,423 @@
+\documentclass[12pt,a4paper]{article}
+
+% IMPORTANT: Compile with XeLaTeX or LuaLaTeX, NOT pdfLaTeX!
+% In VS Code LaTeX Workshop: Add this to settings.json:
+% "latex-workshop.latex.recipes": [
+%   {
+%     "name": "xelatex",
+%     "tools": ["xelatex"]
+%   }
+% ]
+
+% Font and language packages for Mongolian/Cyrillic
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{mongolian}
+\setotherlanguage{english}
+
+% Set fonts that support Cyrillic
+\setmainfont{Times New Roman}  % Or use: DejaVu Serif, Liberation Serif, Noto Serif
+\setsansfont{Arial}             % Or use: DejaVu Sans, Liberation Sans, Noto Sans
+\setmonofont{Courier New}       % Or use: DejaVu Sans Mono, Liberation Mono
+
+% Other packages
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{listings}
+
+% Code listing тохиргоо
+\lstset{
+    language=Python,
+    basicstyle=\small\ttfamily,
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{gray}\itshape,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=5pt,
+    frame=single,
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=4,
+    showstringspaces=false,
+    captionpos=b,
+    xleftmargin=1cm,
+    xrightmargin=0.5cm
+}
+
+% Page setup
+\geometry{left=3cm, right=2cm, top=2.5cm, bottom=2.5cm}
+\onehalfspacing
+
+% Graphics path
+\graphicspath{{media/}{./}}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=blue,
+    unicode=true
+}
+
+\begin{document}
+
+% Custom title page
+\begin{titlepage}
+    \thispagestyle{empty}
+    \centering
+    \vspace*{1cm}
+    
+    % Uncomment when you have the logo image:
+    % \includegraphics[width=3cm]{image1.png}
+    \vspace{1cm}
+    
+    {\Large \textbf{ШИНЭ МОНГОЛ ТЕХНОЛОГИЙН КОЛЛЕЖ}}
+    
+    \vspace{0.5cm}
+    
+    {\large \textbf{КОМПЬЮТЕРЫН УХААНЫ ИНЖЕНЕРИЙН ТЭНХИМ}}
+    
+    \vspace{2cm}
+    
+    \begin{flushright}
+        {\large Оюутны код: s21c076b}\\
+        {\large Оюутны овог нэр: Батцэнгэл АНАР}
+    \end{flushright}
+
+    
+    \vspace{2cm}
+    
+    {\LARGE \textbf{RAG технологид тулгуурласан локал файл хайлтын ухаалаг туслагч}}
+    
+    \vspace{0.5cm}
+    
+    {\large /ТӨГСӨЛТИЙН СУДАЛГААНЫ АЖИЛ/}
+    
+
+    \vspace*{1cm}
+    \begin{flushright}
+        \begin{tabular}{p{13cm} r}
+            Удирдагч багш & Б.Батчулуун \\
+            Гүйцэтгэсэн оюутан & Б.Анар
+        \end{tabular}
+    \end{flushright}
+
+    \vfill
+    \vspace{1cm}
+    
+    {\large Улаанбаатар хот}
+    
+    {\large 2025 он}
+\end{titlepage}
+
+% Second title page
+\begin{titlepage}
+    \thispagestyle{empty}
+    \centering
+    \vspace*{1cm}
+    
+    {\Large \textbf{ШИНЭ МОНГОЛ ТЕХНОЛОГИЙН КОЛЛЕЖ}}
+    
+    \vspace{0.5cm}
+    
+    {\large \textbf{КОМПЬЮТЕРЫН УХААНЫ ИНЖЕНЕРИЙН ТЭНХИМ}}
+    
+    \vspace{2cm}
+    
+    {\large Төгсөлтийн судалгааны ажил}
+    
+    \vspace{1cm}
+    
+    {\LARGE \textbf{RAG технологид тулгуурласан локал файл хайлтын ухаалаг туслагч}}
+    
+    \vspace*{5cm}
+    \begin{tabular}{ll}
+        Гүйцэтгэгч: & Б.Анар \\
+        Удирдагч: & Б.Батчулуун
+    \end{tabular}
+    
+    \vfill
+    \vspace{1cm}
+    
+    {\large Улаанбаатар хот}
+    
+    {\large 2025 он}
+\end{titlepage}
+
+\pagenumbering{roman}
+
+% Abstract
+\newpage
+\section*{Хураангуй}
+\addcontentsline{toc}{section}{Хураангуй}
+
+Энэхүү төгсөлтийн судалгааны ажлын зорилго нь өөрийн сүлжээнд холбогдоогүй орчинд хадгалагдаж буй өгөгдлөөс хиймэл оюун ухаанд суурилсан RAG (Retrieval-Augmented Generation) аргаар мэдээлэл хайх систем боловсруулах явдал юм. Сургуулийн дотоод сүлжээ эсвэл компьютерын диск дотор хадгалагдаж буй баримтууд, бичвэрүүдийг хэрэглэгчийн асуултад үндэслэн автоматаар хайж, хамгийн тохирох хариултыг гаргах системийг бүтээхээр төлөвлөж байна.
+
+Орчин үед мэдээлэл асар хурдтай өсөж байгаа боловч байгууллагын дотоод мэдээллийг үр дүнтэй ашиглахад хүндрэл гардаг. Иймээс энэхүү судалгаагаар дотоод орчинд ажиллах, өгөгдлийн аюулгүй байдлыг хамгаалсан хиймэл оюун ухааны хайлтын систем боловсруулах замаар уг асуудлыг шийдвэрлэхийг зорьж байна.
+
+Төслийн хүрээнд FAISS вектор хайлтын сан, Hugging Face-ийн LLM хэлний загвар, болон LangChain буюу урьдчилан хөгжүүлсэн системийг ашиглан энэхүү системийн туршилтын хувилбарыг боловсруулах бөгөөд эхний шатанд өгөгдлийн бүтцийг тодорхойлох, бичвэрүүдийг вектор хэлбэрт хувиргах, дараагийн шатанд хэрэглэгчийн асуултанд тулгуурлан холбогдох баримт илрүүлэх ба хариулт үүсгэх системийг хэрэгжүүлэхээр төлөвлөж байгаа.
+
+% Table of contents
+\newpage
+\tableofcontents
+
+% List of abbreviations
+\newpage
+\section*{Товчилсон үгийн жагсаалт}
+\addcontentsline{toc}{section}{Товчилсон үгийн жагсаалт}
+
+\begin{enumerate}
+    \item \textbf{RAG} – Retrieval-Augmented Generation — Хайлтад суурилсан хариулт үүсгэх систем
+    \item \textbf{FAISS} – Facebook AI Similarity Search — Вектор ижил төстэй байдлаар хайлт хийх сан
+    \item \textbf{Hugging Face} – Хиймэл оюун ухааны загварууд, датасет хуваалцах нээлттэй платформ
+    \item \textbf{LLM} – Large Language Model — Том хэлний загвар
+    \item \textbf{UI} – User Interface — Хэрэглэгчийн интерфэйс
+    \item \textbf{PDF} – Portable Document Format — Баримт бичгийн олон улсын стандарт формат
+    \item \textbf{JSON} – JavaScript Object Notation — Өгөгдөл солилцох стандарт бүтэцтэй формат.
+    \item \textbf{AI} – Artificial Intelligence — Хиймэл оюун ухаан.
+    \item \textbf{API} – Application Programming Interface — Програм хооронд харилцах холболт
+    \item \textbf{VScode} – Visual Studio Code — Кодыг ажлуулдаг өргөтгөлтэй программ
+\end{enumerate}
+
+% List of tables
+\newpage
+\addcontentsline{toc}{section}{Хүснэгтийн жагсаалт}
+\listoftables
+
+% List of figures
+\newpage
+\addcontentsline{toc}{section}{Зургийн жагсаалт}
+\listoffigures
+
+% Энд Arabic дугаарлалт эхлүүлнэ
+\newpage
+\pagenumbering{arabic}
+
+% Main content
+\section{Ажлын төлөвлөгөө}
+
+Хүснэгт1 Судалгааны ажлын төлөвлөгөө
+
+\begin{table}[H]
+\centering
+\caption{Судалгааны ажлын төлөвлөгөө}
+\label{tab:schedule}
+\small
+\begin{tabularx}{\textwidth}{|c|X|c|c|c|}
+\hline
+№ & Төлөвлөгөө & Эхлэх & Дуусах & Явц \\
+\hline
+1 & Онол, арга зүйн материалуудыг судлах & 2025.10.15 & 2025.10.31 & \\
+\hline
+2 & Системийн ерөнхий төлөвлөгөө боловсруулах & 2025.11.1 & 2025.11.15 & \\
+\hline
+3 & Диск доторх хайлт болон нэвтэрч чадах файлуудыг судлах & 2025.11.15 & 2025.11.30 & \\
+\hline
+4 & ТСА үзлэг 1 & 2025.12.2 & & \\
+\hline
+5 & компьютерийн дискээс автоматаар хайх модуль турших & 2025.12.3 & 2025.12.15 & \\
+\hline
+6 & Хариултын системийг сайжруулах, алдаа засварлах & 2025.12.15 & 2025.12.28 & \\
+\hline
+7 & Векторчлох болон хайлт хариултын системийг сайжруулах турших & 2026.1.2 & 2026.1.15 & \\
+\hline
+8 & Хэрэглэгчийн UI болгох туршилт болон бичвэрийн засвар & 2026.1.15 & 2026.1.31 & \\
+\hline
+9 & UI хийн холбох туршилт хийх & 2026.2.1 & 2026.2.15 & \\
+\hline
+10 & Туршилтын демо бэлтгэх & 2026.2.15 & 2026.2.28 & \\
+\hline
+11 & ТСА үзлэг 2 & 2026.3.1 & & \\
+\hline
+12 & Хариулт хайлт оновчтой болгох & 2026.3.2 & 2026.3.15 & \\
+\hline
+13 & Хэрэглэгчийн туршилт & 2026.3.15 & 2026.3.31 & \\
+\hline
+14 & Судалгааны бичвэрийг боловсруулж дуусгах & 2026.4.1 & 2026.4.15 & \\
+\hline
+15 & Туршилтын үр дүнг нэгтгэх & 2026.4.15 & 2026.4.29 & \\
+\hline
+16 & ТСА урьдчилсан хамгаалалт & 2026.4.30 & & \\
+\hline
+17 & Урьдчилсан хамгаалалтын зөвлөгөө авч сайжруулах & 2026.5.1 & 2026.5.15 & \\
+\hline
+18 & ТСА хамгаалалтанд бэлэн болох & 2026.5.15 & 2026.5.30 & \\
+\hline
+19 & ТСА үндсэн хамгаалалт & 2026.5.31 & & \\
+\hline
+\end{tabularx}
+\end{table}
+
+\newpage
+\section{Удиртгал}
+
+\subsection{Үндэслэл, ач холбогдол}
+
+Одоо үед мэдээллийн технологийн хөгжлийн хурд нэмэгдэж, их хэмжээний өгөгдлийг богино хугацаанд боловсруулах, хайх, дүн шинжилгээ хийх шаардлага улам өсөж байна. Гэвч компьютерын дотоод дискэнд хадгалагдсан файлуудаас шаардлагатай мэдээллийг гараар хайх нь цаг их шаарддаг, алдаа гарах магадлал өндөр үйл явц юм.
+
+APQC-ийн нийтлэг судалгаагаар (жишээ нь 2023 оны KM Benchmark):
+
+\begin{itemize}
+    \item Мэдлэгийн ажилтнууд ажлынхаа 20–30\%-ийг зөвхөн “мэдээлэл хайх эсвэл дахин бүтээхэд” зарцуулдаг. → Энэ нь өдөрт дунджаар 1.8–2 цаг орчим алдаж байна гэсэн үг.
+    \item Мэдээлэл амархан олддог байгууллагууд (good knowledge systems бүхий) энэ хугацааг 50\% хүртэл багасгаж чаддаг.
+    \item Хайлтын үр дүн 1 минут тутамд амжилттай гарч байвал, тухайн байгууллагын productivity-д 15–25\% өсөлт гардаг гэж тооцдог.
+\end{itemize}
+
+Мөн зарим компаниуд хуучин хөгжүүлж байсан код олох ойлгоход хугацаа шаарддаг ба шинээр ирсэн ажилтан өмнөх ажилтны кодыг ойлгохгүй байх тохиолдол ч мөн байдаг. Тиймээс хэрэглэгчийн асуултад үндэслэн дотоод дискнээс мэдээлэл автоматаар хайж, холбогдох хариулт гаргах систем боловсруулах нь мэдээлэл боловсруулах ажлыг хялбарчлах, хугацаа хэмнэх, ажлын бүтээмжийг дээшлүүлэхэд чухал ач холбогдолтой.
+
+\subsection{Зорилго, зорилт}
+
+Энэ судалгааны зорилго нь компьютерын дотоод дискэнд хадгалагдсан бичвэрийн өгөгдлийг боловсруулан, хэрэглэгчийн асуултад тохирох мэдээллийг автоматаар илрүүлж, холбогдох хариултыг гаргаж чаддаг Retrieval-Augmented Generation (RAG) архитектурт суурилсан хариултын системийг боловсруулан ажлын цаг хэмнэх үр бүтээмжтэй байдлыг нэмэгдүүлэх юм.
+
+Зорилт:
+
+\begin{itemize}
+    \item Локал дискнээс өгөгдөл унших, индексжүүлэх, вектор хэлбэрт хөрвүүлэх процессыг RAG системд тохируулах
+    \item Hugging Face pipeline ашиглан хэрэглэгчийн асуултад үндэслэн утгачилсан (context-aware) хариу үүсгэх
+    \item FAISS ашиглан өгөгдлийн хайлтын хурд, нарийвчлалыг сайжруулах
+    \item Хайлтын системийг туршиж оновчтой байдлыг нэмэгдүүлэх
+    \item Цаашид хөгжүүлж чадвал UI-тай буюу хэрэглэгчид хэрэглэхэд амар болгон программ болгон харуулах
+\end{itemize}
+
+\newpage
+\section{Судалгааны сэдвийн онол, өнөөгийн түвшин}
+
+\subsection{Онолын хэсэг}
+
+Зураг1 RAG үндсэн бүтэц
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{zurag1.png}
+\caption{ RAG үндсэн бүтэц}
+\label{fig:rag_structure}
+\end{figure}
+
+RAG систем нь дараах гурван үндсэн бүрэлдэхүүнтэй:
+
+Хайлт хийх хэсэг (Retriever)
+
+\begin{itemize}
+    \item Энэ хэсэгт бүх баримтыг вектор хэлбэрт хөрвүүлэн хадгалдаг.
+    \item Хэрэглэгчийн асуулт орж ирэхэд хамгийн холбоотой гэсэн баримтыг хурдан олж татна.
+    \item Ашигладаг технологи: FAISS, Pinecone, Semantic Searchгэх мэт.
+    \item Үр дүн: LLM-ын үндсэн сургагдсан мэдлэгээр хязгаарлагдахгүй шинэ эх сурвалжаас мэдээлэл ашиглаж чадна.
+\end{itemize}
+
+Хариу үүсгэх хэсэг:(Generator/ LLM)
+
+\begin{itemize}
+    \item Хайлтын хэсгээс татсан баримтад үндэслэн хариу гаргана.
+    \item Ингэснээр хариу нь зөвхөн LLM-ийн зохиох функцийн хариултаар бус шинэ баримттай мэдээллээс хариулт үүсгэнэ.
+    \item Ашигладаг загварууд:T5, GPT, FLAN-T5,ollamaгэх мэт.
+\end{itemize}
+
+Асуулт ангилах, уялдуулах хэсэг (Query Classifier / Router)
+
+\begin{itemize}
+    \item Хэрэглэгчийн асуултыг төрөл, агуулгаар нь ангилж, тохирох баримт руу чиглүүлнэ.
+\end{itemize}
+
+Ажлах дараалал:
+
+\begin{itemize}
+    \item Documents → Баримт бичгүүдийг вектор хэлбэрт хөрвүүлэн хадгална
+    \item User Query → Хэрэглэгч асуулт оруулна
+    \item TOP-K Chunks → Хамгийн холбоотой K ширхэг хэсгүүдийг сонгож авна
+    \item LLM → OpenAI GPT, Gemini зэрэг том хэлний модель хариуг боловсруулна
+    \item Response → Эцсийн хариуг хэрэглэгчид харуулна.
+\end{itemize}
+
+Үндсэн кодны хувьд python ашиглан visual studio code программ дээр хөгжүүлэлт хийсэн. Python нь олон төрлийн үндсэн функц, сан ихтэй хөгжүүлэлт хийхэд амар тул сонгосон.
+
+FAISS (Facebook AI Similarity Search) том хэмжээний өгөгдөл дотор ойролцоо векторуудыг хурдан хайдаг. Санах ой бага зарцуулдаг ба туршихад хялбар сүлжээнд холбогдоогүй байсан ч ажиллах боломжтой.
+
+\subsection{Ижил төрлийн судалгаа}
+
+Experimental Study on RetrievalAugmented Generation: Engineering and Evaluation of a Custom RAG system for OpenDomain QA (University ofPadova, 2024/2025)\\
+
+Evaluation Metrics for Retrieval Augmented Generation in the Scientific Domain (2025)\\
+
+A RetrievalAugmented Generation Framework for Academic Literature Navigation in Data Science (arXiv 2024)\\
+
+Эдгээр судалгаа нь адилхан RAG систем ашигласан боловч зөвхөн pdf, dock гэсэн хязгаарлагдмал өргөтгөлтэй бичиг баримт дээр ажилладаг. Эсвэл сүлжээтэй газар үүлэн сервер дээрээс хайлт хийдгээрээ ялгаатай.
+
+\newpage
+\section{Судалгааны арга зүй}
+
+Энэхүү судалгаа нь хэрэглээний судалгаа бөгөөд энэ нь хүмүүсийн хувийн болон компанийн файл, бичиг баримттай харьцах, хайх хугацааг багасган илүү үр дүнтэй хурдан ажиллахад хэрэг болоход чиглэсэн. Чанарын судалгаа ашиглан ямар хиймэл оюун ухааны модел илүү хариулт гаргаж байгааг үнэлсэн.
+
+Дотоод системээс хайлт хийх учир хандаж чадах бичвэрийн өргөтгөлийг судалсан.
+
+Хүснэгт2 Хандаж чадах өргөтгөлтэй файлууд
+
+\begin{table}[H]
+\centering
+\caption{Хандаж чадах өргөтгөлтэй файлууд}
+\label{tab:file_extensions}
+\includegraphics[width=0.8\textwidth]{husnegt2.png}
+\end{table}
+
+Үндсэн ажиллагааг зураг~\ref{fig:activation} харуулсанчлан хийхээр төлөвлөсөн тул эхлээд өгөгдөл авч түүндээ хариулж чадаж байгаа үгүйг шалган мөн тохирох LLM-ын загваруудыг туршиж үзэн сонгосон.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{zurag2.png}
+\caption{Activation диаграм}
+\label{fig:activation}
+\end{figure}
+
+FAISSвектор дата бааз ашигланembedding model(векторжуулалтын загвар)-оорвектор болгон хувиргаж хурдан хайлт хийх боломжтой болгосон.
+
+LLM-уудыг вектор болгосон өгөгдөл дундаас хэрэглэгч асуулт асуухад хариулж чадаж байгаа үгүйг судлахаар нэг нэгээр нь туршсан ба туршихдаа гурван шалгуур тавьсан. Хариулах буюу бичвэр үүсгэх хурд, асуулт ойлгох чадвар, хариулт үүсгэх гэсэн гурван шалгуур. Үр дүнд зураг~\ref{fig:llm_results} дээр харагдаж буй загварууд ашиглахад амар ба хариулт зөв гаргаж байгаа гэж дүгнэсэн.
+
+Хүснэгт3 LLM-уудын туршсан үр дүн
+
+\begin{table}[H]
+\centering
+\caption{LLM-уудын туршсан үр дүн}
+\label{tab:llm_comparison}
+\includegraphics[width=0.8\textwidth]{zurag3.png}
+\end{table}
+
+Зураг3 LLM-уудын туршсан үр дүн
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{zurag4.png}
+\caption{LLM-уудын туршсан үр дүн}
+\label{fig:llm_results}
+\end{figure}
+
+Энэ судалгааны хувьд олон хүнд хүртээмжтэй байлгахын тулд багтаамж их эзэлдгүй LLM буюу qwen2-ыг сонгосон ба кодыг өгөгдлийн урсгал диаграммаар харуулбал зураг~\ref{fig:dataflow}-т харуулж байна.
+
+Зураг4 Dataflow диаграмм
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{zurag5.png}
+\caption{Dataflow диаграмм}
+\label{fig:dataflow}
+\end{figure}
+
+Зураг5 User case диаграмм
+\begin{figure}[H]
+\centering
+% Uncomment when you have the image:
+% \includegraphics[width=\textwidth]{image7.png}
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{3cm} [User case диаграмм]\\ image7.png \vspace{3cm}}}
+\caption{User case диаграмм}
+\label{fig:usecase}
+\end{figure}
+
+\end{document}

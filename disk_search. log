@@ -1,0 +1,26 @@
+2025-11-30 21:48:15,982 - INFO - 🔍 Starting disk scan...
+2025-11-30 21:48:15,983 - INFO - 📂 Search paths: ['D:/']
+2025-11-30 21:48:15,983 - INFO - 📄 Max files: 1000
+2025-11-30 21:48:15,984 - INFO - 📁 Scanning: D:/
+2025-11-30 21:48:18,051 - INFO - 📋 Found 1000 files to process
+2025-11-30 21:49:13,499 - INFO - ✅ Processed 3913 document chunks from 1000 files
+2025-11-30 21:49:13,503 - INFO - 🔄 Embedding model ачаалж байна...
+2025-11-30 21:49:14,090 - INFO - Load pretrained SentenceTransformer: sentence-transformers/all-distilroberta-v1
+2025-11-30 21:49:21,819 - INFO - ✅ Embedding model бэлэн
+2025-11-30 21:49:21,820 - INFO - 🔄 LLM model ачаалж байна...
+2025-11-30 21:49:23,857 - INFO - ✅ LLM model бэлэн
+2025-11-30 21:49:23,858 - INFO - 🔄 Creating FAISS index with 3913 documents...
+2025-11-30 21:49:52,131 - ERROR - ❌ Index creation failed: TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]
+2025-11-30 21:51:00,335 - INFO - 🔍 Starting disk scan...
+2025-11-30 21:51:00,336 - INFO - 📂 Search paths: ['D:/']
+2025-11-30 21:51:00,336 - INFO - 📄 Max files: 1000
+2025-11-30 21:51:00,336 - INFO - 📁 Scanning: D:/
+2025-11-30 21:51:01,936 - INFO - 📋 Found 1000 files to process
+2025-11-30 21:51:09,024 - INFO - ✅ Processed 3913 document chunks from 1000 files
+2025-11-30 21:51:09,025 - INFO - 🔄 Embedding model ачаалж байна...
+2025-11-30 21:51:09,501 - INFO - Load pretrained SentenceTransformer: sentence-transformers/all-distilroberta-v1
+2025-11-30 21:51:16,726 - INFO - ✅ Embedding model бэлэн
+2025-11-30 21:51:16,726 - INFO - 🔄 LLM model ачаалж байна...
+2025-11-30 21:51:18,403 - INFO - ✅ LLM model бэлэн
+2025-11-30 21:51:18,404 - INFO - 🔄 Creating FAISS index with 3913 documents...
+2025-11-30 21:51:46,378 - ERROR - ❌ Index creation failed: TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]

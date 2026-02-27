@@ -1,0 +1,13 @@
+\xpg@aux {}{mongolian}
+\contentsline {section}{Хураангуй}{i}{section*.1}%
+\contentsline {section}{Товчилсон үгийн жагсаалт}{iii}{section*.3}%
+\contentsline {section}{Хүснэгтийн жагсаалт}{iv}{Item.10}%
+\contentsline {section}{Зургийн жагсаалт}{v}{section*.4}%
+\contentsline {section}{\numberline {1}Ажлын төлөвлөгөө}{1}{section.1}%
+\contentsline {section}{\numberline {2}Удиртгал}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Үндэслэл, ач холбогдол}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Зорилго, зорилт}{2}{subsection.2.2}%
+\contentsline {section}{\numberline {3}Судалгааны сэдвийн онол, өнөөгийн түвшин}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Онолын хэсэг}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Ижил төрлийн судалгаа}{5}{subsection.3.2}%
+\contentsline {section}{\numberline {4}Судалгааны арга зүй}{6}{section.4}%

@@ -1,0 +1,22 @@
+2025-11-30 21:58:49,518 - INFO - 🔍 Starting disk scan...
+2025-11-30 21:58:49,518 - INFO - 📂 Search paths: ['D:/']
+2025-11-30 21:58:49,519 - INFO - 📄 Max files: 500
+2025-11-30 21:58:49,519 - INFO - 📁 Scanning: D:/
+2025-11-30 21:58:49,548 - INFO - 📋 Found 500 files to process
+2025-11-30 21:58:51,124 - INFO - ✅ Created 576 valid document chunks from 500 files
+2025-11-30 21:58:51,146 - INFO - 📄 Indexing 576 valid documents...
+2025-11-30 21:58:51,147 - INFO - 🔄 Loading embedding model...
+2025-11-30 21:58:51,782 - INFO - Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2025-11-30 21:59:01,378 - INFO - ✅ Embedding model ready
+2025-11-30 21:59:01,379 - INFO - 🔄 Loading LLM model...
+2025-11-30 21:59:03,423 - INFO - ✅ LLM model ready
+2025-11-30 21:59:03,423 - INFO - Processing batch 1/6
+2025-11-30 21:59:08,547 - INFO - Loading faiss with AVX2 support.
+2025-11-30 21:59:09,075 - INFO - Successfully loaded faiss with AVX2 support.
+2025-11-30 21:59:09,123 - INFO - Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-11-30 21:59:09,158 - INFO - Processing batch 2/6
+2025-11-30 21:59:13,232 - INFO - Processing batch 3/6
+2025-11-30 21:59:17,296 - INFO - Processing batch 4/6
+2025-11-30 21:59:21,557 - INFO - Processing batch 5/6
+2025-11-30 21:59:26,809 - INFO - Processing batch 6/6
+2025-11-30 21:59:32,031 - INFO - ✅ Index created successfully: faiss_disk_index
