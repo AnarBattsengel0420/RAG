@@ -1,681 +1,667 @@
+"""
+RAG Disk Search — Офлайн, CPU-д зориулсан
+Файлуудыг chunk-лэж индекслээд, асуултад AI-р хариулна.
+Ollama (үндсэн) эсвэл flan-t5 (нөөц) ашиглана.
+"""
 import os
 import json
 import pickle
+import hashlib
+import requests
 from pathlib import Path
 from datetime import datetime
-from transformers import pipeline
+
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-import hashlib
-import re
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# Файл уншигч сангууд
+# Файл уншигч сангууд (optional)
 try:
     import PyPDF2
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
-    print("⚠️ PyPDF2 суугаагүй: pip install PyPDF2")
 
 try:
     import docx
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-    print("⚠️ python-docx суугаагүй: pip install python-docx")
 
 try:
     import pandas as pd
     CSV_AVAILABLE = True
 except ImportError:
     CSV_AVAILABLE = False
-    print("⚠️ pandas суугаагүй: pip install pandas")
 
 try:
     from pptx import Presentation
     PPTX_AVAILABLE = True
 except ImportError:
     PPTX_AVAILABLE = False
-    print("⚠️ python-pptx суугаагүй: pip install python-pptx")
 
 load_dotenv()
 
 # === CONFIG ===
-EMBEDDING_MODEL = "sentence-transformers/all-distilroberta-v1"
-INDEX_FOLDER = "faiss_disk_index"
-METADATA_FILE = "disk_metadata.pkl"
-SUPPORTED_EXTENSIONS = ['.txt', '.pdf', '.docx', '.doc', '.json', '.jsonl', '.csv', '.md', '.pptx', '.ppt']
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+INDEX_FOLDER = "faiss_rag_index"
+METADATA_FILE = "rag_metadata.pkl"
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
+SUPPORTED_EXTENSIONS = {
+    '.txt', '.pdf', '.docx', '.doc', '.json', '.jsonl',
+    '.csv', '.md', '.pptx', '.ppt', '.log',
+}
 
-class AdvancedDiskSearch:
+OLLAMA_URL = "http://localhost:11434"
+OLLAMA_MODEL = "qwen2"
+
+
+# ══════════════════════════════════════════════════════════
+#  Ollama LLM — офлайн, CPU
+# ══════════════════════════════════════════════════════════
+class OllamaLLM:
+    def __init__(self, model=OLLAMA_MODEL, base_url=OLLAMA_URL):
+        self.model = model
+        self.base_url = base_url
+
+    def is_available(self):
+        try:
+            return requests.get(f"{self.base_url}/api/tags", timeout=3).status_code == 200
+        except Exception:
+            return False
+
+    def list_models(self):
+        try:
+            r = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            if r.status_code == 200:
+                return [m["name"] for m in r.json().get("models", [])]
+        except Exception:
+            pass
+        return []
+
+    def generate_stream(self, prompt, temperature=0.3):
+        try:
+            r = requests.post(
+                f"{self.base_url}/api/generate",
+                json={"model": self.model, "prompt": prompt, "stream": True,
+                      "options": {"temperature": temperature}},
+                stream=True, timeout=300,
+            )
+            for line in r.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    if "response" in data:
+                        yield data["response"]
+                    if data.get("done"):
+                        break
+        except requests.exceptions.ConnectionError:
+            yield "\n❌ Ollama холбогдсонгүй. 'ollama serve' ажиллуулна уу."
+        except Exception as e:
+            yield f"\n❌ Алдаа: {e}"
+
+    def generate(self, prompt, temperature=0.3, max_tokens=512):
+        try:
+            r = requests.post(
+                f"{self.base_url}/api/generate",
+                json={"model": self.model, "prompt": prompt, "stream": False,
+                      "options": {"temperature": temperature, "num_predict": max_tokens}},
+                timeout=300,
+            )
+            if r.status_code == 200:
+                return r.json().get("response", "").strip()
+            return f"Ollama алдаа: {r.status_code}"
+        except Exception as e:
+            return f"❌ Алдаа: {e}"
+
+
+# ══════════════════════════════════════════════════════════
+#  RAG систем
+# ══════════════════════════════════════════════════════════
+class DiskSearchRAG:
     def __init__(self, search_paths=None):
-        self.search_paths = search_paths or ["D:/", "C:/Users"]
-        self.embedding = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+        self.search_paths = search_paths or []
         self.db = None
         self.metadata = {}
-        self.all_docs = []
-        
-        # AI сонголт
-        print("\n💡 AI хариулт үүсгэх горимыг сонгоно уу:")
-        print("   1) Идэвхгүй (шууд агуулга харуулах)")
-        print("   2) Суурь AI (flan-t5-base, хурдан)")
-        print("   3) Дэвшилтэт AI (flan-t5-large, илүү сайн)")
-        ai_choice = input("\n   Сонголт (1/2/3, default=1): ").strip() or "1"
-        
+
+        self.splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+
+        print(f"🔄 Embedding ачаалж байна ({EMBEDDING_MODEL})...")
+        self.embedding = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+        print("✅ Embedding бэлэн\n")
+
+        # AI model автоматаар сонгох
+        self.llm = None
         self.pipe = None
-        self.use_ai = False
-        
-        if ai_choice in ['2', '3']:
-            try:
-                model_name = "google/flan-t5-large" if ai_choice == '3' else "google/flan-t5-base"
-                print(f"\n🔄 AI model ачаалж байна ({model_name})...")
-                if ai_choice == '3':
-                    print("   ⚠️  Анх удаа бол 1-2 минут үргэлжилнэ...")
-                
-                self.pipe = pipeline(
-                    "text2text-generation",
-                    model=model_name,
-                    max_new_tokens=200,
-                    device=-1
-                )
-                self.use_ai = True
-                print("✅ AI model бэлэн боллоо\n")
-            except Exception as e:
-                print(f"⚠️ AI model алдаа: {e}")
-                print("   Файлын агуулгыг шууд харуулах горимд шилжлээ\n")
-        else:
-            print("✅ Файлын агуулгыг шууд харуулах горим\n")
+        self.ai_mode = "none"
+        self._init_ai()
 
-    def get_file_hash(self, filepath):
+    # ── AI model сонгох ──────────────────────────────────
+    def _init_ai(self):
+        ollama = OllamaLLM()
+        if ollama.is_available():
+            models = ollama.list_models()
+            if models:
+                names = [m.split(":")[0] for m in models]
+                if OLLAMA_MODEL in names or OLLAMA_MODEL.split(":")[0] in names:
+                    ollama.model = OLLAMA_MODEL
+                else:
+                    ollama.model = models[0]
+                self.llm = ollama
+                self.ai_mode = "ollama"
+                print(f"✅ Ollama бэлэн — model: {ollama.model}")
+                if len(models) > 1:
+                    print(f"   Бусад: {', '.join(models[:5])}")
+                return
+
+        print("⚠️ Ollama олдсонгүй → flan-t5-base ачаалж байна...")
         try:
-            with open(filepath, 'rb') as f:
-                return hashlib.md5(f.read()).hexdigest()
-        except:
-            return None
+            from transformers import pipeline
+            self.pipe = pipeline(
+                "text2text-generation",
+                model="google/flan-t5-base",
+                max_new_tokens=200,
+                device=-1,
+            )
+            self.ai_mode = "flan-t5"
+            print("✅ flan-t5-base бэлэн\n")
+        except Exception as e:
+            print(f"⚠️ AI model ачаалж чадсангүй: {e}")
+            self.ai_mode = "none"
 
-    def should_skip_directory(self, dirpath):
-        skip_dirs = {
-            'node_modules', '__pycache__', '.git', '.venv', 'venv',
-            'AppData', 'Windows', 'Program Files', 'System32',
-            '$RECYCLE.BIN', 'Recovery', 'ProgramData',
-            'Microsoft VS Code', 'Visual Studio', 'extensions',
-            'resources', 'locales', 'vendor', 'build', 'dist'
-        }
-        return any(skip in dirpath for skip in skip_dirs)
-
-    def read_txt_file(self, filepath):
-        encodings = ['utf-8', 'utf-16', 'cp1252', 'latin-1']
-        for encoding in encodings:
+    # ── Файл уншигчид ────────────────────────────────────
+    @staticmethod
+    def _read_txt(filepath):
+        for enc in ("utf-8", "utf-16", "cp1252", "latin-1"):
             try:
-                with open(filepath, 'r', encoding=encoding) as f:
-                    return f.read()
-            except:
+                with open(filepath, "r", encoding=enc, errors="ignore") as f:
+                    return f.read(200_000)
+            except Exception:
                 continue
         return None
 
-    def read_pdf_file(self, filepath):
+    @staticmethod
+    def _read_pdf(filepath):
         if not PDF_AVAILABLE:
             return None
         try:
-            text = ""
-            with open(filepath, 'rb') as f:
-                pdf_reader = PyPDF2.PdfReader(f)
-                for page in pdf_reader.pages[:50]:  # Limit to 50 pages
-                    extracted = page.extract_text()
-                    if extracted:
-                        text += extracted + "\n"
-            return text.strip()
-        except Exception as e:
-            print(f"⚠️ PDF уншихад алдаа {filepath}: {e}")
+            with open(filepath, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                pages = [p.extract_text() or "" for p in reader.pages[:50]]
+            return "\n".join(pages).strip()
+        except Exception:
             return None
 
-    def read_docx_file(self, filepath):
+    @staticmethod
+    def _read_docx(filepath):
         if not DOCX_AVAILABLE:
             return None
         try:
             doc = docx.Document(filepath)
-            text = "\n".join([para.text for para in doc.paragraphs])
-            return text.strip()
-        except Exception as e:
-            print(f"⚠️ DOCX уншихад алдаа {filepath}: {e}")
+            return "\n".join(p.text for p in doc.paragraphs).strip()
+        except Exception:
             return None
 
-    def read_csv_file(self, filepath):
+    @staticmethod
+    def _read_csv(filepath):
         if not CSV_AVAILABLE:
             return None
-        try:
-            df = pd.read_csv(filepath, encoding='utf-8', nrows=1000)
-            return df.to_string()
-        except Exception as e:
+        for enc in ("utf-8", "latin-1"):
             try:
-                df = pd.read_csv(filepath, encoding='latin-1', nrows=1000)
-                return df.to_string()
-            except:
-                print(f"⚠️ CSV уншихад алдаа {filepath}: {e}")
-                return None
+                return pd.read_csv(filepath, encoding=enc, nrows=500).to_string()
+            except Exception:
+                continue
+        return None
 
-    def read_json_file(self, filepath):
+    @staticmethod
+    def _read_json(filepath):
         try:
-            if filepath.endswith('.jsonl'):
-                texts = []
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    for i, line in enumerate(f):
-                        if i >= 100:
-                            break
-                        data = json.loads(line)
-                        texts.append(json.dumps(data, indent=2, ensure_ascii=False))
-                return "\n---\n".join(texts)
-            else:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return json.dumps(data, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"⚠️ JSON уншихад алдаа {filepath}: {e}")
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                if filepath.endswith(".jsonl"):
+                    lines = [json.loads(ln) for i, ln in enumerate(f) if i < 100]
+                    return "\n---\n".join(
+                        json.dumps(d, indent=2, ensure_ascii=False) for d in lines
+                    )
+                return json.dumps(json.load(f), indent=2, ensure_ascii=False)
+        except Exception:
             return None
 
-    def read_pptx_file(self, filepath):
+    @staticmethod
+    def _read_pptx(filepath):
         if not PPTX_AVAILABLE:
             return None
         try:
             prs = Presentation(filepath)
-            text = []
-            for slide in prs.slides[:50]:  # Limit to 50 slides
+            texts = []
+            for slide in prs.slides[:50]:
                 for shape in slide.shapes:
                     if hasattr(shape, "text") and shape.text.strip():
-                        text.append(shape.text)
-            return "\n".join(text)
-        except Exception as e:
-            print(f"⚠️ PPTX уншихад алдаа {filepath}: {e}")
+                        texts.append(shape.text)
+            return "\n".join(texts)
+        except Exception:
             return None
 
     def read_file(self, filepath):
         ext = Path(filepath).suffix.lower()
-        if ext in ['.txt', '.md', '.log']:
-            return self.read_txt_file(filepath)
-        elif ext == '.pdf':
-            return self.read_pdf_file(filepath)
-        elif ext in ['.docx', '.doc']:
-            return self.read_docx_file(filepath)
-        elif ext == '.csv':
-            return self.read_csv_file(filepath)
-        elif ext in ['.json', '.jsonl']:
-            return self.read_json_file(filepath)
-        elif ext in ['.pptx', '.ppt']:
-            return self.read_pptx_file(filepath)
-        else:
+        readers = {
+            ".txt": self._read_txt, ".md": self._read_txt, ".log": self._read_txt,
+            ".pdf": self._read_pdf,
+            ".docx": self._read_docx, ".doc": self._read_docx,
+            ".csv": self._read_csv,
+            ".json": self._read_json, ".jsonl": self._read_json,
+            ".pptx": self._read_pptx, ".ppt": self._read_pptx,
+        }
+        reader = readers.get(ext)
+        return reader(filepath) if reader else None
+
+    # ── Туслах функцууд ──────────────────────────────────
+    @staticmethod
+    def _file_hash(filepath):
+        try:
+            md5 = hashlib.md5()
+            with open(filepath, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    md5.update(chunk)
+            return md5.hexdigest()
+        except Exception:
             return None
 
-    def scan_disk(self, max_files=1000, max_size_mb=10):
-        print(f"🔍 Диск хайж эхэлж байна: {self.search_paths}")
-        print(f"📂 Дэмжигдсэн файлын төрөл: {', '.join(SUPPORTED_EXTENSIONS)}")
-        documents = []
+    @staticmethod
+    def _should_skip(dirpath):
+        skip = {
+            "node_modules", "__pycache__", ".git", ".venv", "venv",
+            "appdata", "windows", "program files", "system32",
+            "$recycle.bin", "recovery", "programdata",
+        }
+        lower = dirpath.lower()
+        return any(s in lower for s in skip)
+
+    # ── Scan + Index ─────────────────────────────────────
+    def scan_and_index(self, max_files=1000, max_size_mb=10):
+        """Файлуудыг уншиж, chunk-лэж, FAISS индекс үүсгэнэ."""
+        print(f"\n🔍 Хайж байна: {', '.join(self.search_paths)}")
+        print(f"📂 Төрлүүд: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
+
+        max_bytes = max_size_mb * 1024 * 1024
+        all_chunks = []
         file_count = 0
-        max_size_bytes = max_size_mb * 1024 * 1024
+        file_list = []
+
         for search_path in self.search_paths:
             if not os.path.exists(search_path):
-                print(f"⚠️ Директори олдсонгүй: {search_path}")
+                print(f"⚠️ Олдсонгүй: {search_path}")
                 continue
-            print(f"\n📁 Хайж байна: {search_path}")
+
             for root, dirs, files in os.walk(search_path):
-                if self.should_skip_directory(root):
+                if self._should_skip(root):
                     dirs[:] = []
                     continue
+
                 for filename in files:
                     if file_count >= max_files:
-                        print(f"\n⚠️ Хязгаарт хүрлээ: {max_files} файл")
                         break
-                    filepath = os.path.join(root, filename)
+
                     ext = Path(filename).suffix.lower()
                     if ext not in SUPPORTED_EXTENSIONS:
                         continue
+
+                    filepath = os.path.join(root, filename)
                     try:
-                        file_size = os.path.getsize(filepath)
-                        if file_size > max_size_bytes or file_size == 0:
+                        fsize = os.path.getsize(filepath)
+                        if fsize > max_bytes or fsize == 0:
                             continue
-                    except:
+                    except Exception:
                         continue
+
                     content = self.read_file(filepath)
                     if not content or len(content.strip()) < 50:
                         continue
-                    file_hash = self.get_file_hash(filepath)
-                    modified_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-                    doc = Document(
-                        page_content=content[:5000],
-                        metadata={
-                            "filename": filename,
-                            "filepath": filepath,
-                            "extension": ext,
-                            "size_kb": file_size / 1024,
-                            "modified": modified_time.isoformat(),
-                            "hash": file_hash
-                        }
-                    )
-                    documents.append(doc)
+
+                    # Chunk-лэх
+                    chunks = self.splitter.split_text(content)
+
+                    file_meta = {
+                        "filename": filename,
+                        "filepath": filepath,
+                        "extension": ext,
+                        "size_kb": fsize / 1024,
+                        "modified": datetime.fromtimestamp(
+                            os.path.getmtime(filepath)
+                        ).isoformat(),
+                        "hash": self._file_hash(filepath),
+                    }
+                    file_list.append(file_meta)
+
+                    for ci, chunk_text in enumerate(chunks):
+                        doc = Document(
+                            page_content=chunk_text,
+                            metadata={
+                                **file_meta,
+                                "chunk_index": ci,
+                                "total_chunks": len(chunks),
+                            },
+                        )
+                        all_chunks.append(doc)
+
                     file_count += 1
                     if file_count % 50 == 0:
-                        print(f"✅ {file_count} файл боловсруулсан...")
+                        print(f"  ✅ {file_count} файл ({len(all_chunks)} chunk)...")
+
                 if file_count >= max_files:
                     break
-        print(f"\n✅ Нийт {len(documents)} файл боловсруулсан")
-        self.all_docs = documents
-        return documents
 
-    def create_index(self, documents):
-        if not documents:
-            print("❌ Индекс үүсгэх баримт байхгүй")
+        print(f"\n📊 {file_count} файл → {len(all_chunks)} chunk")
+
+        if not all_chunks:
+            print("❌ Файл олдсонгүй")
             return False
-        print(f"\n🔄 FAISS индекс үүсгэж байна ({len(documents)} баримт)...")
-        try:
-            self.db = FAISS.from_documents(documents, self.embedding)
-            os.makedirs(INDEX_FOLDER, exist_ok=True)
-            self.db.save_local(INDEX_FOLDER)
-            self.metadata = {
-                "created": datetime.now().isoformat(),
-                "num_documents": len(documents),
-                "files": [doc.metadata for doc in documents]
-            }
-            with open(METADATA_FILE, 'wb') as f:
-                pickle.dump(self.metadata, f)
-            print(f"✅ Индекс амжилттай үүсгэгдлээ: {INDEX_FOLDER}")
-            return True
-        except Exception as e:
-            print(f"❌ Индекс үүсгэхэд алдаа: {e}")
-            return False
+
+        print("🔄 FAISS индекс үүсгэж байна...")
+        self.db = FAISS.from_documents(all_chunks, self.embedding)
+        os.makedirs(INDEX_FOLDER, exist_ok=True)
+        self.db.save_local(INDEX_FOLDER)
+
+        self.metadata = {
+            "created": datetime.now().isoformat(),
+            "num_files": file_count,
+            "num_chunks": len(all_chunks),
+            "files": file_list,
+        }
+        with open(METADATA_FILE, "wb") as f:
+            pickle.dump(self.metadata, f)
+
+        print(f"✅ Индекс хадгалагдлаа: {INDEX_FOLDER}/")
+        return True
 
     def load_index(self):
         if not os.path.exists(INDEX_FOLDER):
-            print("⚠️ Индекс олдсонгүй. Эхлээд scan_disk() дуудна уу.")
             return False
         try:
             print("🔄 Индекс ачаалж байна...")
-            self.db = FAISS.load_local(INDEX_FOLDER, self.embedding, allow_dangerous_deserialization=True)
+            self.db = FAISS.load_local(
+                INDEX_FOLDER, self.embedding,
+                allow_dangerous_deserialization=True,
+            )
             if os.path.exists(METADATA_FILE):
-                with open(METADATA_FILE, 'rb') as f:
+                with open(METADATA_FILE, "rb") as f:
                     self.metadata = pickle.load(f)
-                print(f"✅ Индекс ачаалагдлаа: {self.metadata.get('num_documents', 0)} баримт")
-            else:
-                print("⚠️ Metadata олдсонгүй")
+            nf = self.metadata.get("num_files", self.metadata.get("num_documents", 0))
+            nc = self.metadata.get("num_chunks", "?")
+            print(f"✅ Ачаалагдлаа: {nf} файл, {nc} chunk")
             return True
         except Exception as e:
             print(f"❌ Индекс ачаалахад алдаа: {e}")
             return False
 
-    def search_by_keyword(self, keyword):
-        keyword = keyword.lower()
-        results = []
-        if self.metadata and "files" in self.metadata:
-            for file_meta in self.metadata["files"]:
-                if keyword in file_meta.get("filename", "").lower():
-                    results.append(file_meta)
-        return results
-
-    def semantic_search(self, query, k=5, score_threshold=2.0):
+    # ── Хайлт ────────────────────────────────────────────
+    def search(self, query, k=5):
         if not self.db:
-            print("❌ Индекс ачаалаагүй байна")
+            print("❌ Индекс ачаалаагүй")
             return []
         try:
-            results = self.db.similarity_search_with_score(query, k=k)
-            filtered = [(doc, score) for doc, score in results if score < score_threshold]
-            if not filtered and results:
-                print(f"⚠️ Threshold-оос давсан, бүх үр дүнг харуулж байна")
-                filtered = results
-            return filtered
+            return self.db.similarity_search_with_score(query, k=k)
         except Exception as e:
             print(f"❌ Хайлтад алдаа: {e}")
             return []
 
-    def extract_smart_info(self, content, query):
-        """
-        Ерөнхий зориулалтын ухаалаг мэдээлэл задлах
-        Ямар ч төрлийн асуултад хариулах боломжтой
-        """
-        extracted = []
-        query_lower = query.lower()
-        query_words = set(re.findall(r'\w+', query_lower))
-        
-        # === 1. Түлхүүр үг-утга хос олох (Key: Value, Key = Value, Key - Value) ===
-        kv_patterns = [
-            r'([A-Za-zА-Яа-яёүөЁҮӨ\w\s]{2,30})\s*[:\：=]\s*([^\n\r]{3,100})',
-            r'([A-Za-zА-Яа-яёүөЁҮӨ\w\s]{2,30})\s*[-–—]\s*([^\n\r]{3,100})',
-        ]
-        
-        for pattern in kv_patterns:
-            matches = re.findall(pattern, content)
-            for key, value in matches:
-                key_clean = key.strip().lower()
-                value_clean = value.strip()
-                # Асуултын үгтэй холбоотой эсэхийг шалгах
-                key_words = set(re.findall(r'\w+', key_clean))
-                if query_words & key_words or any(qw in key_clean for qw in query_words if len(qw) > 2):
-                    if len(value_clean) > 2 and len(value_clean) < 200:
-                        extracted.append(f"✓ {key.strip()}: {value_clean}")
-        
-        # === 2. Асуултын түлхүүр үгийн эргэн тойрон дахь контекст ===
-        content_lower = content.lower()
-        for word in query_words:
-            if len(word) < 3:
-                continue
-            # Түлхүүр үг олох
-            for match in re.finditer(re.escape(word), content_lower):
-                start = max(0, match.start() - 100)
-                end = min(len(content), match.end() + 150)
-                context = content[start:end].strip()
-                
-                # Мөр бүтнээр авах
-                lines = context.split('\n')
-                relevant_lines = []
-                for line in lines:
-                    if word in line.lower() and len(line.strip()) > 10:
-                        clean_line = line.strip()
-                        if clean_line not in [e.split(': ', 1)[-1] if ': ' in e else e for e in extracted]:
-                            relevant_lines.append(clean_line)
-                
-                if relevant_lines and len(extracted) < 5:
-                    for line in relevant_lines[:2]:
-                        if len(line) < 200:
-                            extracted.append(f"→ {line}")
-                break  # Зөвхөн эхний тохирлыг авах
-        
-        # === 3. Тоон утга, хувь, хэмжээ олох ===
-        number_context_pattern = r'([A-Za-zА-Яа-яёүөЁҮӨ\w\s]{2,25})\s*[:\：]?\s*(\d+(?:[.,]\d+)?)\s*(%|хувь|percent|USD|₮|¥|\$|€|kg|km|м|cm|mm|GB|MB|TB|件|個|人|年|月|日)?'
-        num_matches = re.findall(number_context_pattern, content)
-        for label, number, unit in num_matches:
-            label_clean = label.strip().lower()
-            if any(qw in label_clean for qw in query_words if len(qw) > 2):
-                unit_str = unit if unit else ""
-                extracted.append(f"✓ {label.strip()}: {number}{unit_str}")
-        
-        # === 4. Огноо, хугацаа олох ===
-        date_patterns = [
-            r'(\d{4})\s*[年/-]\s*(\d{1,2})\s*[月/-]?\s*(\d{1,2})?\s*日?',
-            r'(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})',
-        ]
-        for pattern in date_patterns:
-            date_matches = re.findall(pattern, content)
-            if date_matches and any(kw in query_lower for kw in ['when', 'date', 'time', 'хэзээ', 'огноо', 'year', 'month', 'он', 'сар']):
-                for dm in date_matches[:3]:
-                    date_str = "/".join([d for d in dm if d])
-                    if date_str not in str(extracted):
-                        extracted.append(f"📅 {date_str}")
-        
-        # === 5. Email, Phone, URL - ерөнхий ===
-        common_patterns = {
-            'Email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-            'Phone': r'[\+]?[\d\s\-\(\)]{8,15}',
-            'URL': r'https?://[^\s<>"{}|\\^`\[\]]+',
-        }
-        for label, pattern in common_patterns.items():
-            if any(kw in query_lower for kw in [label.lower(), 'contact', 'холбоо', 'утас', 'имэйл', 'link', 'website']):
-                matches = re.findall(pattern, content)
-                if matches:
-                    extracted.append(f"✓ {label}: {matches[0]}")
-        
-        # === 6. Жагсаалт, bullet point олох ===
-        list_patterns = [
-            r'[•·◦▪▫●○]\s*([^\n]{5,100})',
-            r'^\s*[-\*]\s+([^\n]{5,100})',
-            r'^\s*\d+[.)]\s+([^\n]{5,100})',
-        ]
-        for pattern in list_patterns:
-            list_matches = re.findall(pattern, content, re.MULTILINE)
-            relevant_items = [item.strip() for item in list_matches 
-                           if any(qw in item.lower() for qw in query_words if len(qw) > 2)]
-            if relevant_items and len(extracted) < 8:
-                for item in relevant_items[:3]:
-                    extracted.append(f"• {item}")
-        
-        # === 7. Давхардал арилгах ===
-        unique_extracted = []
-        seen = set()
-        for item in extracted:
-            # Хялбаршуулсан текстээр давхардал шалгах
-            simplified = re.sub(r'[^\w\s]', '', item.lower())
-            if simplified not in seen and len(simplified) > 5:
-                seen.add(simplified)
-                unique_extracted.append(item)
-        
-        return unique_extracted[:8] if unique_extracted else None
-
-    def generate_answer(self, results, question):
-        """Сайжруулсан AI хариулт үүсгэх - олон төрлийн асуултад"""
+    # ── AI хариулт ───────────────────────────────────────
+    def answer(self, question, k=5):
+        results = self.search(question, k=k)
         if not results:
-            return "Олдсон файлуудад хариулт байхгүй."
+            print("❌ Холбогдох мэдээлэл олдсонгүй.\n")
+            return
 
-        # 1. Эхлээд ухаалаг задлалт хийх (pattern matching)
-        all_extracted = []
-        sources_with_info = []
-        
-        for doc, score in results[:5]:  # Top 5 баримт шалгах
-            extracted = self.extract_smart_info(doc.page_content, question)
-            if extracted:
-                filename = doc.metadata.get('filename', 'Unknown')
-                for info in extracted:
-                    all_extracted.append(info)
-                    sources_with_info.append(filename)
-        
-        # Хэрэв pattern-ээр олдвол шууд буцаах
-        if all_extracted:
-            unique_sources = list(set(sources_with_info))
-            result = "\n".join(all_extracted)
-            result += f"\n\n📚 Эх: {', '.join(unique_sources)}"
-            return result
-        
-        # 2. Pattern олдохгүй бол AI ашиглах
-        if not self.use_ai:
-            # AI идэвхгүй бол агуулгын хураангуй буцаах
-            summaries = []
-            for i, (doc, score) in enumerate(results[:2], 1):
-                filename = doc.metadata.get('filename', 'Unknown')
-                snippet = doc.page_content[:400].strip()
-                summaries.append(f"📄 [{i}] {filename}:\n{snippet}...")
-            return "\n\n".join(summaries)
-        
-        # 3. AI хариулт үүсгэх
-        snippets = []
+        # Хайлтын үр дүн харуулах
+        seen_files = set()
         sources = []
-        
-        for i, (doc, score) in enumerate(results[:3], 1):
-            filename = doc.metadata.get("filename", f"source_{i}")
-            content = doc.page_content.replace("\n", " ").strip()
-            snippet = content[:350]
-            snippets.append(f"[{i}] {filename}: {snippet}")
-            sources.append(filename)
+        context_parts = []
 
-        context = "\n\n".join(snippets)
-        
-        # Товч, тодорхой prompt
+        print(f"\n📚 {len(results)} холбогдох хэсэг олдлоо:")
+        for i, (doc, score) in enumerate(results, 1):
+            fn = doc.metadata.get("filename", "?")
+            ci = doc.metadata.get("chunk_index", 0)
+            snippet = doc.page_content[:100].replace("\n", " ")
+            print(f"  {i}. {fn} [#{ci}] (score: {score:.3f}) — {snippet}...")
+
+            context_parts.append(f"[{fn} хэсэг {ci}]:\n{doc.page_content}")
+            if fn not in seen_files:
+                sources.append(fn)
+                seen_files.add(fn)
+
+        context = "\n\n---\n\n".join(context_parts)
+
+        # AI хариулт
+        if self.ai_mode == "ollama":
+            self._answer_ollama(context, question, sources)
+        elif self.ai_mode == "flan-t5":
+            self._answer_flan(context, question, sources)
+        else:
+            self._answer_fallback(results, sources)
+
+    def _answer_ollama(self, context, question, sources):
+        prompt = f"""Дараах эх сурвалжуудаас ЗӨВХӨН мэдээлэл ашиглан асуултад хариулна уу.
+
+ЭХ СУРВАЛЖУУД:
+{context[:3000]}
+
+АСУУЛТ: {question}
+
+ЗААВАРЧИЛГАА:
+- Зөвхөн өгөгдсөн эх сурвалжаас хариулна
+- Товч, тодорхой хариулна
+- Мэдээлэл байхгүй бол "Энэ мэдээлэл эх сурвалжид байхгүй" гэж хэлнэ
+- Асуулт ямар хэлээр байна тэр хэлээр хариулна
+
+ХАРИУЛТ:"""
+
+        print(f"\n🤖 AI ({self.llm.model}):")
+        print("─" * 50)
+        for chunk in self.llm.generate_stream(prompt):
+            print(chunk, end="", flush=True)
+        print(f"\n\n📚 Эх: {', '.join(sources)}")
+        print("─" * 50)
+
+    def _answer_flan(self, context, question, sources):
         prompt = (
-            f"Based on these documents, answer the question directly and concisely.\n"
-            f"Extract specific facts, dates, names, or numbers if present.\n\n"
-            f"{context}\n\n"
-            f"Question: {question}\n"
-            f"Answer (be brief and specific):"
+            f"Based on these documents, answer concisely:\n\n"
+            f"{context[:800]}\n\n"
+            f"Question: {question}\nAnswer:"
         )
-        
-        # Token шалгалт
         if len(prompt.split()) > 400:
-            snippets = [s[:250] for s in snippets[:2]]
-            context = "\n".join(snippets)
-            prompt = f"Answer based on:\n{context}\n\nQ: {question}\nA:"
+            prompt = f"Answer based on:\n{context[:500]}\n\nQ: {question}\nA:"
 
         try:
             result = self.pipe(
                 prompt,
-                max_new_tokens=120,
-                do_sample=False,
-                num_beams=1,
-                early_stopping=True
+                max_new_tokens=150,
+                do_sample=False, num_beams=1, early_stopping=True,
             )
-            
             text = ""
-            if isinstance(result, list) and len(result) > 0:
-                text = result[0].get("generated_text", "") or result[0].get("summary_text", "")
-            
-            # Хариулт шалгах
-            if not text or len(text.strip()) < 10:
-                return f"📋 Файлуудад мэдээлэл байгаа боловч AI задлаж чадсангүй.\n\n📚 Эх: {', '.join(sources)}"
-            
+            if isinstance(result, list) and result:
+                text = result[0].get("generated_text", "")
+
+            if not text or len(text.strip()) < 5:
+                print(f"\n📋 AI задлаж чадсангүй.\n📚 Эх: {', '.join(sources)}")
+                return
+
             text = text.strip()
-            
-            # Давталт шалгах (AI алдаа)
+
+            # Давталт шалгах
             words = text.split()
             if len(words) > 3:
-                # Нэг үг хэт их давтагдаж байвал
-                word_counts = {}
-                for word in words:
-                    word_counts[word] = word_counts.get(word, 0) + 1
-                max_count = max(word_counts.values())
-                if max_count > len(words) / 3:
-                    return f"⚠️ AI хариулт алдаатай (давталт илэрсэн)\n\n📚 Эх: {', '.join(sources)}"
-            
-            # Prompt давталт шалгах
-            if "Question:" in text or "Answer:" in text:
-                # Prompt-ыг давтаж буцаасан
-                parts = text.split("Answer:")
-                if len(parts) > 1:
-                    text = parts[-1].strip()
-            
-            # Эх сурвалж нэмэх
-            if not any(s in text for s in sources):
-                text += f"\n\n📚 Эх: {', '.join(sources)}"
-            
-            return text
-            
-        except Exception as e:
-            return f"⚠️ AI алдаа: {e}\n\n📚 Эх: {', '.join(sources)}"
+                counts = {}
+                for w in words:
+                    counts[w] = counts.get(w, 0) + 1
+                if max(counts.values()) > len(words) / 3:
+                    print(f"\n⚠️ AI давталт илэрсэн.\n📚 Эх: {', '.join(sources)}")
+                    return
 
-    def interactive_search(self):
-        print("\n" + "="*60)
-        print("🧠 Диск Хайлтын AI Систем Бэлэн")
-        print("="*60)
-        print("💡 Командууд:")
-        print("  - 'stats' - статистик харах")
-        print("  - 'rescan' - дахин хайх")
-        print("  - 'exit' - гарах")
-        print("="*60 + "\n")
+            # Prompt давталт шалгах
+            if "Answer:" in text:
+                text = text.split("Answer:")[-1].strip()
+
+            print(f"\n🤖 AI (flan-t5):")
+            print("─" * 50)
+            print(text)
+            print(f"\n📚 Эх: {', '.join(sources)}")
+            print("─" * 50)
+
+        except Exception as e:
+            print(f"\n⚠️ AI алдаа: {e}")
+
+    def _answer_fallback(self, results, sources):
+        print(f"\n📋 AI идэвхгүй — файлын агуулга:")
+        print("─" * 50)
+        for i, (doc, score) in enumerate(results[:3], 1):
+            fn = doc.metadata.get("filename", "?")
+            print(f"\n[{i}] {fn}:")
+            print(doc.page_content[:400].strip())
+            if len(doc.page_content) > 400:
+                print("...")
+        print(f"\n📚 Эх: {', '.join(sources)}")
+        print("─" * 50)
+
+    # ── Статистик ────────────────────────────────────────
+    def show_stats(self):
+        if not self.metadata:
+            print("📊 Статистик байхгүй\n")
+            return
+        print("\n" + "=" * 50)
+        print("📊 Статистик")
+        print("=" * 50)
+        print(f"📅 Үүссэн: {self.metadata.get('created', '?')}")
+        nf = self.metadata.get("num_files", self.metadata.get("num_documents", 0))
+        print(f"📄 Файл: {nf}")
+        print(f"📦 Chunk: {self.metadata.get('num_chunks', '?')}")
+        print(f"🤖 AI: {self.ai_mode}"
+              + (f" ({self.llm.model})" if self.ai_mode == "ollama" else ""))
+
+        if "files" in self.metadata:
+            exts = {}
+            total_kb = 0.0
+            for fm in self.metadata["files"]:
+                ext = fm.get("extension", "?")
+                exts[ext] = exts.get(ext, 0) + 1
+                total_kb += fm.get("size_kb", 0)
+            print(f"💾 Хэмжээ: {total_kb / 1024:.1f} MB")
+            print("\n📂 Төрлүүд:")
+            for ext, cnt in sorted(exts.items(), key=lambda x: -x[1]):
+                print(f"   {ext}: {cnt}")
+            print(f"\n📋 Файлууд ({min(20, len(self.metadata['files']))}"
+                  f"/{len(self.metadata['files'])}):")
+            for i, fm in enumerate(self.metadata["files"][:20], 1):
+                print(f"   {i}. {fm.get('filename')} ({fm.get('extension')})")
+            if len(self.metadata["files"]) > 20:
+                print(f"   ... +{len(self.metadata['files']) - 20}")
+        print("=" * 50 + "\n")
+
+    # ── Интерактив горим ─────────────────────────────────
+    def interactive(self):
+        print("\n" + "=" * 50)
+        print("🧠 RAG Хайлтын Систем")
+        print("=" * 50)
+        ai_label = self.ai_mode
+        if self.ai_mode == "ollama":
+            ai_label += f" ({self.llm.model})"
+        print(f"🤖 AI: {ai_label}")
+        print("💡 Командууд: stats | rescan | model <нэр> | exit")
+        print("=" * 50 + "\n")
 
         while True:
-            user_input = input("🔍 Асуулт: ").strip()
-            if not user_input:
+            try:
+                q = input("❓ Асуулт: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\n👋 Баяртай!")
+                break
+
+            if not q:
                 continue
-            if user_input.lower() == "exit":
+
+            cmd = q.lower()
+            if cmd == "exit":
                 print("👋 Баяртай!")
                 break
-            if user_input.lower() == "stats":
-                self.show_statistics()
+            if cmd == "stats":
+                self.show_stats()
                 continue
-            if user_input.lower() == "rescan":
-                print("\n🔄 Дахин хайж, индекс үүсгэж байна...")
-                docs = self.scan_disk(max_files=500)
-                self.create_index(docs)
+            if cmd == "rescan":
+                self.scan_and_index()
                 continue
-
-            # Түлхүүр үгээр хайлт
-            keyword_results = self.search_by_keyword(user_input)
-            if keyword_results:
-                print(f"\n[🔎 Түлхүүр үг] {len(keyword_results)} файл олдлоо:")
-                for result in keyword_results[:3]:
-                    print(f"  📄 {result['filename']} ({result['extension']})")
-                    print(f"     📁 {result['filepath']}")
-
-            # Утгын хайлт
-            semantic_results = self.semantic_search(user_input, k=5)
-            if not semantic_results:
-                print("\n❌ Холбогдох мэдээлэл олдсонгүй.")
-                print("💡 Зөвлөмж:")
-                print("   - Өөр үг хэллэгээр оролдоно уу")
-                print("   - 'stats' командаар ямар файлууд байгааг харна уу")
-                print("   - 'rescan' командаар дахин хайж үзнэ үү\n")
+            if cmd.startswith("model "):
+                if self.ai_mode == "ollama":
+                    self.llm.model = q[6:].strip()
+                    print(f"✅ Model: {self.llm.model}\n")
+                else:
+                    print("⚠️ Ollama идэвхгүй байна\n")
                 continue
 
-            print(f"\n[📚 Утгын хайлт] {len(semantic_results)} баримт олдлоо:")
-            for i, (doc, score) in enumerate(semantic_results, 1):
-                snippet = doc.page_content[:200].replace("\n", " ") + "..."
-                print(f"\n{i}. 🎯 Оноо: {score:.4f}")
-                print(f"   📄 Файл: {doc.metadata.get('filename', 'Unknown')}")
-                print(f"   📂 Зам: {doc.metadata.get('filepath', 'Unknown')}")
-                print(f"   📏 Хэмжээ: {doc.metadata.get('size_kb', 0):.1f} KB")
-                print(f"   📝 Агуулга: {snippet}")
+            self.answer(q)
+            print()
 
-            # AI хариулт
-            if self.use_ai:
-                print(f"\n🤖 AI хариулт үүсгэж байна...")
-                answer = self.generate_answer(semantic_results[:3], user_input)
-                print(f"\n💡 AI Хариулт:")
-                print("="*60)
-                print(answer)
-                print("="*60)
-            
-            # Файлын агуулга үргэлж харуулах
-            print(f"\n📋 Дэлгэрэнгүй агуулга:")
-            for i, (doc, score) in enumerate(semantic_results[:2], 1):
-                content = doc.page_content[:600].strip()
-                print(f"\n{'─'*60}")
-                print(f"[{i}] {doc.metadata.get('filename')}")
-                print(f"{'─'*60}")
-                print(content)
-                if len(doc.page_content) > 600:
-                    print(f"... ({len(doc.page_content)-600} тэмдэгт үлдсэн)")
-            
-            print("\n" + "-"*60 + "\n")
-
-    def show_statistics(self):
-        if not self.metadata:
-            print("📊 Статистик байхгүй")
-            return
-        print("\n" + "="*60)
-        print("📊 Системийн Статистик")
-        print("="*60)
-        print(f"📅 Үүссэн: {self.metadata.get('created', 'Unknown')}")
-        print(f"📄 Нийт баримт: {self.metadata.get('num_documents', 0)}")
-        if "files" in self.metadata:
-            extensions = {}
-            total_size = 0
-            for file_meta in self.metadata["files"]:
-                ext = file_meta.get("extension", "unknown")
-                size = file_meta.get("size_kb", 0)
-                extensions[ext] = extensions.get(ext, 0) + 1
-                total_size += size
-            print(f"💾 Нийт хэмжээ: {total_size/1024:.2f} MB")
-            print("\n📂 Файлын төрөл:")
-            for ext, count in sorted(extensions.items(), key=lambda x: x[1], reverse=True):
-                print(f"   {ext}: {count} файл")
-            print("\n📋 Баримтын жагсаалт:")
-            for i, file_meta in enumerate(self.metadata["files"][:20], 1):
-                print(f"   {i}. {file_meta.get('filename', 'Unknown')} ({file_meta.get('extension', 'unknown')})")
-            if len(self.metadata["files"]) > 20:
-                print(f"   ... болон өөр {len(self.metadata['files']) - 20} файл")
-        print("="*60 + "\n")
 
 def main():
-    print("🚀 Диск Хайлтын Систем Эхэллээ\n")
-    print("📁 Хайх директоруудыг оруулна уу (таслалаар тусгаарлана):")
-    print("   Жишээ: D:/Documents, D:/Projects, C:/Users/YourName/Desktop")
-    print("   Хоосон орхивол D:/ болон C:/Users хайна")
-    user_paths = input("\n📂 Директори: ").strip()
-    if user_paths:
-        search_paths = [p.strip() for p in user_paths.split(",")]
-    else:
-        search_paths = ["D:/", "C:/Users"]
-    searcher = AdvancedDiskSearch(search_paths=search_paths)
+    print("🚀 RAG Диск Хайлтын Систем\n")
+
+    # Суугаагүй сангуудын мэдэгдэл
+    missing = []
+    if not PDF_AVAILABLE:
+        missing.append("PyPDF2")
+    if not DOCX_AVAILABLE:
+        missing.append("python-docx")
+    if not CSV_AVAILABLE:
+        missing.append("pandas")
+    if not PPTX_AVAILABLE:
+        missing.append("python-pptx")
+    if missing:
+        print(f"⚠️ Суугаагүй сангууд: {', '.join(missing)}")
+        print(f"   pip install {' '.join(missing)}\n")
+
+    # Хайх директори
+    print("📁 Хайх директори (таслалаар тусгаарлана):")
+    print("   Жишээ: D:/Documents, D:/Projects")
+    try:
+        user_paths = input("\n📂 Директори: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        return
+
+    paths = (
+        [p.strip() for p in user_paths.split(",") if p.strip()]
+        if user_paths
+        else ["D:/", "C:/Users"]
+    )
+
+    rag = DiskSearchRAG(search_paths=paths)
+
+    # Индекс ачаалах эсвэл шинээр үүсгэх
     if os.path.exists(INDEX_FOLDER):
-        print(f"\n✅ Хадгалсан индекс олдлоо: {INDEX_FOLDER}")
-        choice = input("Ашиглах уу? (y/n): ").strip().lower()
-        if choice == 'y':
-            if searcher.load_index():
-                searcher.interactive_search()
+        print(f"\n✅ Индекс олдлоо: {INDEX_FOLDER}")
+        try:
+            choice = input("Ашиглах уу? (y/n, default=y): ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            return
+        if choice != "n":
+            if rag.load_index():
+                rag.interactive()
                 return
-    print("\n🔄 Диск хайж, индекс үүсгэж байна...")
-    print("⚠️ Энэ удаан үргэлжлэх боломжтой (5-30 минут)")
-    max_files = input("\nХамгийн их файлын тоо (default 1000): ").strip()
-    max_files = int(max_files) if max_files.isdigit() else 1000
-    docs = searcher.scan_disk(max_files=max_files, max_size_mb=10)
-    if docs:
-        if searcher.create_index(docs):
-            searcher.interactive_search()
+
+    print("\n🔄 Шинэ индекс үүсгэж байна...")
+    try:
+        max_f = input("Файлын дээд хязгаар (default 1000): ").strip()
+    except (KeyboardInterrupt, EOFError):
+        return
+    max_files = int(max_f) if max_f.isdigit() else 1000
+
+    if rag.scan_and_index(max_files=max_files):
+        rag.interactive()
     else:
-        print("❌ Файл олдсонгүй")
+        print("❌ Индекс үүсгэж чадсангүй")
+
 
 if __name__ == "__main__":
-    main() 
+    main()
